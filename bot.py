@@ -1,407 +1,159 @@
-require('dotenv').config();
-const {
-  Client,
-  GatewayIntentBits,
-  REST,
-  Routes,
-  SlashCommandBuilder,
-  ChannelType,
-  PermissionFlagsBits,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  ActionRowBuilder,
-  EmbedBuilder,
-  version: discordJsVersion,
-} = require('discord.js');
+import discord
+from discord import app_commands
+import json
+import os
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
-});
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
 
-const COLOR_POR_DEFECTO = 0xF5C451; // Color por defecto de la barra lateral de /anuncio
-const MAX_MINUTOS_MUTE = 40320; // 28 días, límite de Discord para timeouts
+client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client)
 
-// ============================================================
-// 1. DEFINICIÓN DE LOS COMANDOS (slash commands)
-// ============================================================
+# ── Sistema de idiomas ─────────────────────────────────────
+idioma_servidor = {}
 
-const commands = [
-  new SlashCommandBuilder()
-    .setName('anuncio')
-    .setDescription('Publica un anuncio con formato en el canal que elijas')
-    .addChannelOption(option =>
-      option
-        .setName('canal')
-        .setDescription('Canal donde se enviará el anuncio')
-        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-        .setRequired(true)
-    )
-    .addStringOption(option =>
-      option
-        .setName('color')
-        .setDescription('Color de la barra lateral (hex, ej: #f5c451)')
-        .setRequired(false)
-    )
-    .addRoleOption(option =>
-      option
-        .setName('mencionar')
-        .setDescription('Rol a mencionar junto con el anuncio (opcional)')
-        .setRequired(false)
-    )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
-
-  new SlashCommandBuilder()
-    .setName('userinfo')
-    .setDescription('Muestra información de un usuario del servidor')
-    .addUserOption(option =>
-      option
-        .setName('usuario')
-        .setDescription('Usuario a consultar (por defecto, tú mismo)')
-        .setRequired(false)
-    ),
-
-  new SlashCommandBuilder()
-    .setName('botinfo')
-    .setDescription('Muestra información y estadísticas del bot'),
-
-  new SlashCommandBuilder()
-    .setName('ban')
-    .setDescription('Banea a un usuario del servidor')
-    .addUserOption(option =>
-      option.setName('usuario').setDescription('Usuario a banear').setRequired(true)
-    )
-    .addStringOption(option =>
-      option.setName('razon').setDescription('Razón del baneo').setRequired(false)
-    )
-    .addIntegerOption(option =>
-      option
-        .setName('borrar_mensajes')
-        .setDescription('Días de mensajes a borrar (0-7). Por defecto 0.')
-        .setMinValue(0)
-        .setMaxValue(7)
-        .setRequired(false)
-    )
-    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
-
-  new SlashCommandBuilder()
-    .setName('mute')
-    .setDescription('Silencia temporalmente a un usuario (timeout)')
-    .addUserOption(option =>
-      option.setName('usuario').setDescription('Usuario a silenciar').setRequired(true)
-    )
-    .addIntegerOption(option =>
-      option
-        .setName('minutos')
-        .setDescription('Duración en minutos (máx. 40320 = 28 días). Por defecto 10.')
-        .setMinValue(1)
-        .setMaxValue(MAX_MINUTOS_MUTE)
-        .setRequired(false)
-    )
-    .addStringOption(option =>
-      option.setName('razon').setDescription('Razón del silencio').setRequired(false)
-    )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
-].map(command => command.toJSON());
-
-// ============================================================
-// 2. REGISTRO AUTOMÁTICO DE LOS COMANDOS AL INICIAR
-// ============================================================
-
-async function registrarComandos() {
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-  try {
-    console.log(`Registrando ${commands.length} comando(s)...`);
-    if (process.env.GUILD_ID) {
-      await rest.put(
-        Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-        { body: commands }
-      );
-      console.log('Comandos registrados en el servidor indicado (GUILD_ID).');
-    } else {
-      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-      console.log('Comandos registrados globalmente (puede tardar hasta 1 hora en aparecer).');
-    }
-  } catch (error) {
-    console.error('Error registrando comandos:', error);
-  }
+TEXTOS = {
+    "es": {
+        "reglas_ok": "✅ Mensaje enviado en {canal}",
+        "kick_ok": "👢 **{usuario}** fue expulsado. Razón: {razon}",
+        "kick_rol_alto": "❌ No puedo expulsar a ese usuario (su rol es igual o superior al mío).",
+        "kick_sin_permisos": "❌ No tengo permisos suficientes para expulsar a ese usuario.",
+        "xp_ok": "✨ **{usuario}** ahora tiene **{total}** XP ({signo}{cantidad}).",
+        "nivel_ok": "📊 **{usuario}** tiene **{xp}** XP.",
+        "sin_permiso": "❌ No tienes permisos para usar este comando.",
+    },
+    "en": {
+        "reglas_ok": "✅ Message sent in {canal}",
+        "kick_ok": "👢 **{usuario}** was kicked. Reason: {razon}",
+        "kick_rol_alto": "❌ I can't kick that user (their role is equal to or higher than mine).",
+        "kick_sin_permisos": "❌ I don't have enough permissions to kick that user.",
+        "xp_ok": "✨ **{usuario}** now has **{total}** XP ({signo}{cantidad}).",
+        "nivel_ok": "📊 **{usuario}** has **{xp}** XP.",
+        "sin_permiso": "❌ You don't have permission to use this command.",
+    },
+    "pt": {
+        "reglas_ok": "✅ Mensagem enviada em {canal}",
+        "kick_ok": "👢 **{usuario}** foi expulso. Motivo: {razon}",
+        "kick_rol_alto": "❌ Não posso expulsar esse usuário (o cargo dele é igual ou superior ao meu).",
+        "kick_sin_permisos": "❌ Não tenho permissões suficientes para expulsar esse usuário.",
+        "xp_ok": "✨ **{usuario}** agora tem **{total}** XP ({signo}{cantidad}).",
+        "nivel_ok": "📊 **{usuario}** tem **{xp}** XP.",
+        "sin_permiso": "❌ Você não tem permissão para usar este comando.",
+    },
 }
 
-// ============================================================
-// 3. FUNCIONES AUXILIARES
-// ============================================================
 
-function formatearDuracion(ms) {
-  const segundos = Math.floor(ms / 1000) % 60;
-  const minutos = Math.floor(ms / (1000 * 60)) % 60;
-  const horas = Math.floor(ms / (1000 * 60 * 60)) % 24;
-  const dias = Math.floor(ms / (1000 * 60 * 60 * 24));
-  return `${dias}d ${horas}h ${minutos}m ${segundos}s`;
-}
+def t(guild_id, clave, **kwargs):
+    lang = idioma_servidor.get(guild_id, "es")
+    texto = TEXTOS[lang].get(clave, TEXTOS["es"].get(clave, clave))
+    return texto.format(**kwargs) if kwargs else texto
 
-// ============================================================
-// 4. MANEJO DE INTERACCIONES
-// ============================================================
 
-client.once('ready', async () => {
-  console.log(`Bot conectado como ${client.user.tag}`);
-  await registrarComandos();
-});
+@client.event
+async def on_ready():
+    await tree.sync()
+    print(f"✅ Bot conectado como: {client.user}")
+    await client.change_presence(activity=discord.Game(name="/reglas /kick /xp"))
 
-client.on('interactionCreate', async (interaction) => {
-  try {
-    // ---------- /anuncio: abre el modal ----------
-    if (interaction.isChatInputCommand() && interaction.commandName === 'anuncio') {
-      const canal = interaction.options.getChannel('canal');
-      const colorInput = interaction.options.getString('color') || '';
-      const rolMencion = interaction.options.getRole('mencionar');
 
-      const permisosBot = canal.permissionsFor(interaction.guild.members.me);
-      if (!permisosBot?.has(PermissionFlagsBits.SendMessages) || !permisosBot?.has(PermissionFlagsBits.EmbedLinks)) {
-        return interaction.reply({
-          content: `No tengo permisos para enviar mensajes o embeds en ${canal}.`,
-          ephemeral: true,
-        });
-      }
+# ── XP: almacenamiento en JSON ──────────────────────────────
+XP_FILE = "xp_data.json"
 
-      const customId = `anuncioModal|${canal.id}|${encodeURIComponent(colorInput)}|${rolMencion ? rolMencion.id : ''}`;
 
-      const modal = new ModalBuilder().setCustomId(customId).setTitle('Crear anuncio');
+def cargar_xp() -> dict:
+    if not os.path.exists(XP_FILE):
+        return {}
+    with open(XP_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-      const tituloInput = new TextInputBuilder()
-        .setCustomId('titulo')
-        .setLabel('Título del anuncio')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('Ej: NYC | DRILL ROLEPLAY 🇺🇸')
-        .setMaxLength(256)
-        .setRequired(true);
 
-      const contenidoInput = new TextInputBuilder()
-        .setCustomId('contenido')
-        .setLabel('Contenido (usa saltos de línea y -)')
-        .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('1. Respeto al Roleplay\n- Todas las acciones deben tener sentido dentro del rol.')
-        .setMaxLength(4000)
-        .setRequired(true);
+def guardar_xp(data: dict) -> None:
+    with open(XP_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(tituloInput),
-        new ActionRowBuilder().addComponents(contenidoInput)
-      );
 
-      return interaction.showModal(modal);
-    }
+# ── /reglas ──────────────────────────────────────────────────
+@tree.command(name="reglas", description="Envía un mensaje/reglas a un canal elegido")
+@app_commands.checks.has_permissions(manage_guild=True)
+@app_commands.describe(
+    canal="Canal donde se enviará el mensaje",
+    texto="El texto que quieres que aparezca en el mensaje",
+)
+async def reglas(interaction: discord.Interaction, canal: discord.TextChannel, texto: str):
+    gid = interaction.guild.id
+    embed = discord.Embed(
+        title="📋 『SERVER RULES』",
+        description=texto,
+        color=discord.Color.blurple(),
+    )
+    if interaction.guild.icon:
+        embed.set_thumbnail(url=interaction.guild.icon.url)
 
-    // ---------- Envío del modal de /anuncio ----------
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('anuncioModal|')) {
-      const [, canalId, colorEncoded, rolId] = interaction.customId.split('|');
-      const colorInput = decodeURIComponent(colorEncoded);
+    await canal.send(embed=embed)
+    await interaction.response.send_message(t(gid, "reglas_ok", canal=canal.mention), ephemeral=True)
 
-      const titulo = interaction.fields.getTextInputValue('titulo');
-      const contenido = interaction.fields.getTextInputValue('contenido');
 
-      const canal = await interaction.guild.channels.fetch(canalId).catch(() => null);
-      if (!canal) {
-        return interaction.reply({ content: 'No se encontró el canal indicado.', ephemeral: true });
-      }
+# ── /kick ────────────────────────────────────────────────────
+@tree.command(name="kick", description="Expulsa a un usuario del servidor")
+@app_commands.checks.has_permissions(kick_members=True)
+@app_commands.describe(
+    usuario="Usuario que quieres expulsar",
+    razon="Motivo de la expulsión (opcional)",
+)
+async def kick(interaction: discord.Interaction, usuario: discord.Member, razon: str = "Sin razón especificada"):
+    gid = interaction.guild.id
 
-      let color = COLOR_POR_DEFECTO;
-      if (/^#?[0-9a-fA-F]{6}$/.test(colorInput)) {
-        color = parseInt(colorInput.replace('#', ''), 16);
-      }
+    if usuario.top_role >= interaction.guild.me.top_role:
+        await interaction.response.send_message(t(gid, "kick_rol_alto"), ephemeral=True)
+        return
 
-      const embed = new EmbedBuilder()
-        .setColor(color)
-        .setTitle(titulo)
-        .setDescription(contenido)
-        .setTimestamp()
-        .setFooter({ text: interaction.guild.name, iconURL: interaction.guild.iconURL() || undefined });
+    try:
+        await usuario.kick(reason=razon)
+        await interaction.response.send_message(t(gid, "kick_ok", usuario=usuario, razon=razon))
+    except discord.Forbidden:
+        await interaction.response.send_message(t(gid, "kick_sin_permisos"), ephemeral=True)
 
-      const contenidoMencion = rolId ? `<@&${rolId}>` : undefined;
 
-      await canal.send({ content: contenidoMencion, embeds: [embed] });
-      return interaction.reply({ content: `Anuncio publicado en ${canal}.`, ephemeral: true });
-    }
+# ── /xp ──────────────────────────────────────────────────────
+@tree.command(name="xp", description="Da (o quita) XP a un usuario")
+@app_commands.checks.has_permissions(manage_guild=True)
+@app_commands.describe(
+    usuario="Usuario al que le darás XP",
+    cantidad="Cantidad de XP a otorgar (usa un número negativo para quitar)",
+)
+async def xp(interaction: discord.Interaction, usuario: discord.Member, cantidad: int):
+    gid = interaction.guild.id
+    data = cargar_xp()
+    user_id = str(usuario.id)
+    data[user_id] = max(0, data.get(user_id, 0) + cantidad)
+    guardar_xp(data)
 
-    if (!interaction.isChatInputCommand()) return;
+    signo = "+" if cantidad >= 0 else ""
+    await interaction.response.send_message(
+        t(gid, "xp_ok", usuario=usuario, total=data[user_id], signo=signo, cantidad=cantidad)
+    )
 
-    // ---------- /userinfo ----------
-    if (interaction.commandName === 'userinfo') {
-      const usuario = interaction.options.getUser('usuario') || interaction.user;
-      const miembro = await interaction.guild.members.fetch(usuario.id).catch(() => null);
 
-      const roles = miembro
-        ? miembro.roles.cache
-            .filter(rol => rol.id !== interaction.guild.id)
-            .sort((a, b) => b.position - a.position)
-            .map(rol => `<@&${rol.id}>`)
-        : [];
+# ── /nivel (consultar XP) ───────────────────────────────────
+@tree.command(name="nivel", description="Muestra el XP de un usuario")
+@app_commands.describe(usuario="Usuario a consultar (por defecto, tú mismo)")
+async def nivel(interaction: discord.Interaction, usuario: discord.Member = None):
+    gid = interaction.guild.id
+    usuario = usuario or interaction.user
+    data = cargar_xp()
+    xp_actual = data.get(str(usuario.id), 0)
+    await interaction.response.send_message(t(gid, "nivel_ok", usuario=usuario, xp=xp_actual))
 
-      const embed = new EmbedBuilder()
-        .setColor(miembro?.displayHexColor && miembro.displayHexColor !== '#000000' ? miembro.displayHexColor : 0x5865F2)
-        .setTitle(`Información de ${usuario.username}`)
-        .setThumbnail(usuario.displayAvatarURL({ size: 256 }))
-        .addFields(
-          { name: 'Usuario', value: `<@${usuario.id}>`, inline: true },
-          { name: 'ID', value: usuario.id, inline: true },
-          { name: 'Cuenta creada', value: `<t:${Math.floor(usuario.createdTimestamp / 1000)}:F>`, inline: false }
-        )
-        .setTimestamp();
 
-      if (miembro) {
-        embed.addFields(
-          { name: 'Se unió al servidor', value: `<t:${Math.floor(miembro.joinedTimestamp / 1000)}:F>`, inline: false },
-          { name: `Roles (${roles.length})`, value: roles.length ? roles.join(' ') : 'Sin roles', inline: false }
-        );
-      } else {
-        embed.addFields({ name: 'Nota', value: 'Este usuario no se encuentra en el servidor.' });
-      }
+# ── Manejo de errores de permisos (para todos los comandos) ─
+@reglas.error
+@kick.error
+@xp.error
+async def comandos_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message(t(interaction.guild.id, "sin_permiso"), ephemeral=True)
+    else:
+        raise error
 
-      return interaction.reply({ embeds: [embed] });
-    }
-
-    // ---------- /botinfo ----------
-    if (interaction.commandName === 'botinfo') {
-      const uptime = formatearDuracion(client.uptime);
-      const servidores = client.guilds.cache.size;
-      const usuarios = client.guilds.cache.reduce((total, guild) => total + guild.memberCount, 0);
-      const ping = client.ws.ping;
-
-      const embed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle(`${client.user.username} — Información del bot`)
-        .setThumbnail(client.user.displayAvatarURL({ size: 256 }))
-        .addFields(
-          { name: 'Servidores', value: `${servidores}`, inline: true },
-          { name: 'Usuarios (aprox.)', value: `${usuarios}`, inline: true },
-          { name: 'Ping', value: `${ping}ms`, inline: true },
-          { name: 'Tiempo en línea', value: uptime, inline: true },
-          { name: 'Librería', value: `discord.js v${discordJsVersion}`, inline: true },
-          { name: 'Node.js', value: process.version, inline: true }
-        )
-        .setFooter({ text: 'NYC | DRILL ROLEPLAY 🇺🇸' })
-        .setTimestamp();
-
-      return interaction.reply({ embeds: [embed] });
-    }
-
-    // ---------- /ban ----------
-    if (interaction.commandName === 'ban') {
-      const usuario = interaction.options.getUser('usuario', true);
-      const razon = interaction.options.getString('razon') || 'No se proporcionó una razón';
-      const diasBorrado = interaction.options.getInteger('borrar_mensajes') || 0;
-
-      if (usuario.id === interaction.user.id) {
-        return interaction.reply({ content: 'No puedes banearte a ti mismo.', ephemeral: true });
-      }
-      if (usuario.id === interaction.guild.ownerId) {
-        return interaction.reply({ content: 'No puedes banear al dueño del servidor.', ephemeral: true });
-      }
-
-      const miembro = await interaction.guild.members.fetch(usuario.id).catch(() => null);
-      if (miembro) {
-        if (!miembro.bannable) {
-          return interaction.reply({
-            content: 'No puedo banear a este usuario (su rol es igual o superior al mío).',
-            ephemeral: true,
-          });
-        }
-        const autorMiembro = await interaction.guild.members.fetch(interaction.user.id);
-        if (
-          miembro.roles.highest.position >= autorMiembro.roles.highest.position &&
-          interaction.guild.ownerId !== interaction.user.id
-        ) {
-          return interaction.reply({
-            content: 'No puedes banear a alguien con un rol igual o superior al tuyo.',
-            ephemeral: true,
-          });
-        }
-      }
-
-      try {
-        await interaction.guild.members.ban(usuario.id, {
-          reason: `${razon} | Baneado por ${interaction.user.tag}`,
-          deleteMessageSeconds: diasBorrado * 24 * 60 * 60,
-        });
-
-        const embed = new EmbedBuilder()
-          .setColor(0xED4245)
-          .setTitle('Usuario baneado')
-          .addFields(
-            { name: 'Usuario', value: `${usuario.tag} (${usuario.id})`, inline: false },
-            { name: 'Razón', value: razon, inline: false },
-            { name: 'Moderador', value: `<@${interaction.user.id}>`, inline: false }
-          )
-          .setTimestamp();
-
-        return interaction.reply({ embeds: [embed] });
-      } catch (error) {
-        console.error(error);
-        return interaction.reply({ content: 'Ocurrió un error al intentar banear al usuario.', ephemeral: true });
-      }
-    }
-
-    // ---------- /mute ----------
-    if (interaction.commandName === 'mute') {
-      const usuario = interaction.options.getUser('usuario', true);
-      const minutos = interaction.options.getInteger('minutos') || 10;
-      const razon = interaction.options.getString('razon') || 'No se proporcionó una razón';
-
-      if (usuario.id === interaction.user.id) {
-        return interaction.reply({ content: 'No puedes silenciarte a ti mismo.', ephemeral: true });
-      }
-      if (usuario.id === interaction.guild.ownerId) {
-        return interaction.reply({ content: 'No puedes silenciar al dueño del servidor.', ephemeral: true });
-      }
-
-      const miembro = await interaction.guild.members.fetch(usuario.id).catch(() => null);
-      if (!miembro) {
-        return interaction.reply({ content: 'Ese usuario no está en el servidor.', ephemeral: true });
-      }
-      if (!miembro.moderatable) {
-        return interaction.reply({
-          content: 'No puedo silenciar a este usuario (su rol es igual o superior al mío).',
-          ephemeral: true,
-        });
-      }
-
-      const autorMiembro = await interaction.guild.members.fetch(interaction.user.id);
-      if (
-        miembro.roles.highest.position >= autorMiembro.roles.highest.position &&
-        interaction.guild.ownerId !== interaction.user.id
-      ) {
-        return interaction.reply({
-          content: 'No puedes silenciar a alguien con un rol igual o superior al tuyo.',
-          ephemeral: true,
-        });
-      }
-
-      try {
-        await miembro.timeout(minutos * 60 * 1000, `${razon} | Silenciado por ${interaction.user.tag}`);
-
-        const embed = new EmbedBuilder()
-          .setColor(0xFEE75C)
-          .setTitle('Usuario silenciado')
-          .addFields(
-            { name: 'Usuario', value: `${usuario.tag} (${usuario.id})`, inline: false },
-            { name: 'Duración', value: `${minutos} minuto(s)`, inline: true },
-            { name: 'Razón', value: razon, inline: false },
-            { name: 'Moderador', value: `<@${interaction.user.id}>`, inline: false }
-          )
-          .setTimestamp();
-
-        return interaction.reply({ embeds: [embed] });
-      } catch (error) {
-        console.error(error);
-        return interaction.reply({ content: 'Ocurrió un error al intentar silenciar al usuario.', ephemeral: true });
-      }
-    }
-  } catch (error) {
-    console.error(error);
-    if (interaction.isRepliable()) {
-      await interaction.reply({ content: 'Ocurrió un error al procesar la interacción.', ephemeral: true }).catch(() => {});
-    }
-  }
-});
-
-client.login(process.env.DISCORD_TOKEN);
+# client.run(os.getenv("DISCORD_TOKEN"))  # usa variable de entorno, no pongas el token aquí
